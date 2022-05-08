@@ -1,7 +1,6 @@
 from numba import cuda, jit, float32
 import numpy as np
 import matplotlib.pyplot as plt
-from time import time
 
 ## vector addition
 @cuda.jit
