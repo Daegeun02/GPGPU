@@ -4,7 +4,7 @@ import matplotlib
 import matplotlib.pyplot as plt
 
 def simple_mandelbrot(width, height, real_low, real_high, imag_low, imag_high, max_iters):
-    
+
     real_vals = np.linspace(real_low, real_high, width)
     imag_vals = np.linspace(imag_low, imag_high, height)
 
