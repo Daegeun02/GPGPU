@@ -1,1 +1,3 @@
 ipynb files...
+
+가끔 가다 pycuda 책 내용을 
