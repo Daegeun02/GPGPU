@@ -17,9 +17,9 @@ in your terminal or just download folder...
 
 in module...
 
-> from solver import *
-> lstsq = LeastSquare(INPUTMATRIX, OUTPUTVECTOR, learning_rate, beta=beta, optimize_method="GD")
-> lstsq.solve()
+> from solver import *<br>
+> lstsq = LeastSquare(INPUTMATRIX, OUTPUTVECTOR, learning_rate, beta=beta, optimize_method="GD")<br>
+> lstsq.solve()<br>
 > optimal_theta = lstsq.shared.GPU_theta.get()
 
 end...
