@@ -5,6 +5,8 @@
 밑에 있는 python 파일들을 위에서 만든 함수들을 분류해서 모아둔 파일들 입니다.<br>
 개인적으로 "2022_03_2022_04.ipynb" 는 난잡해서 "Convolution_Functions.py"를 보시는 걸 추천드립니다.
 
+Files from <> are about PyCUDA...
+
 
 ## to use
 type 
@@ -13,6 +15,16 @@ type
 
 in your terminal or just download folder...
 
+in module...
+
+> from solver import *
+> lstsq = LeastSquare(INPUTMATRIX, OUTPUTVECTOR, learning_rate, beta=beta, optimize_method="GD")
+> lstsq.solve()
+> optimal_theta = lstsq.shared.GPU_theta.get()
+
+end...
+
 ## update teasor
 ...
 ㅎ
+
