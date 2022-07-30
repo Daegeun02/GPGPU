@@ -9,6 +9,9 @@ Files from "lstsq/2022_05_03.ipynb" are about PyCUDA...
 
 
 ## to use
+
+1. Least Square Solver
+
 type 
 
 > git clone https://github.com/Daegeun02/GPGPU
@@ -22,9 +25,18 @@ in python...
 > lstsq.solve()<br>
 > optimal_theta = lstsq.shared.GPU_theta.get()
 
+2. Minimum Energy Control Solver
+
+> from solver import *<br>
+> MECS = MinimumEnergyControlSolver(InitialPoint, TargetPoint, UpperBoundary, DownerBoundary, StepSize, MaxEpoch, MaxIteration)<br>
+> MECS.solve
+> result = MECS.copy_and_unpack_result()
+> result has {"rho_matrix", "u", "G", "gram_G", "Q", "C", "G_C", "gradient", "error", "error_vector", "norm_of_gradient"}
+
 end...
 
 ## update teasor
+MECS with changable step size...
 ...
 ㅎ
 
