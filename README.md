@@ -40,7 +40,7 @@ in python...
 > 
 > result = MECS.copy_and_unpack_result()<br>
 > 
-> result has {"rho_matrix", "u", "G", "gram_G", "Q", "C", "G_C", "gradient", "error", "error_vector", "norm_of_gradient"}
+> result is dictionary type with keys {"rho_matrix", "u", "G", "gram_G", "Q", "C", "G_C", "gradient", "error", "error_vector", "norm_of_gradient"}
 
 end...
 
