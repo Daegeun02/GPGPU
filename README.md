@@ -21,8 +21,11 @@ in python...
 1. Least Square Solver
 
 > from solver import *<br>
+> 
 > lstsq = LeastSquare(INPUTMATRIX, OUTPUTVECTOR, learning_rate, beta=beta, optimize_method="GD")<br>
+> 
 > lstsq.solve()<br>
+> 
 > optimal_theta = lstsq.shared.GPU_theta.get()
 
 ---
@@ -30,9 +33,13 @@ in python...
 2. Minimum Energy Control Solver
 
 > from solver import *<br>
+> 
 > MECS = MinimumEnergyControlSolver(InitialPoint, TargetPoint, UpperBoundary, DownerBoundary, StepSize, MaxEpoch, MaxIteration)<br>
+> 
 > MECS.solve
-> result = MECS.copy_and_unpack_result()
+> 
+> result = MECS.copy_and_unpack_result()<br>
+> 
 > result has {"rho_matrix", "u", "G", "gram_G", "Q", "C", "G_C", "gradient", "error", "error_vector", "norm_of_gradient"}
 
 end...
