@@ -10,8 +10,6 @@ Files from "lstsq/2022_05_03.ipynb" are about PyCUDA...
 
 ## to use
 
-1. Least Square Solver
-
 type 
 
 > git clone https://github.com/Daegeun02/GPGPU
@@ -20,10 +18,14 @@ in your terminal or just download folder...
 
 in python...
 
+1. Least Square Solver
+
 > from solver import *<br>
 > lstsq = LeastSquare(INPUTMATRIX, OUTPUTVECTOR, learning_rate, beta=beta, optimize_method="GD")<br>
 > lstsq.solve()<br>
 > optimal_theta = lstsq.shared.GPU_theta.get()
+
+---
 
 2. Minimum Energy Control Solver
 
