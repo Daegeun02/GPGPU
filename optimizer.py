@@ -199,3 +199,75 @@ class NesterovMethod(Optimizer):
                       np.float32(self.shared.beta),
                       block=(self.shared.width,1,1),
                       grid=(1,1,1))
+
+
+
+class OptimizerForGuidance:
+    def __init__(self, learning_rate, step):
+        ## important parameters
+        self.axis = 3
+        self.DOF  = 6
+        
+        ## set parameters
+        lr_set = (np.ones((self.axis*step)) * learning_rate).astype(np.float32)
+        lr_set_byte = lr_set.nbytes
+        self.lr_set = cuda.mem_alloc(lr_set_byte)
+        cuda.memcpy_htod(self.lr_set, lr_set)
+        
+        ## kernel function
+        self.kernel_function()
+
+    def run(self, theta, gradient, step):
+        ## theta, gradient: gpuarray type variable
+        self.basic_optimizer(theta,
+                             gradient,
+                             self.lr_set,
+                             block=(3,1,1),
+                             grid=(step,1,1))
+
+    def memory_free(self):
+        self.lr_set.free()
+
+    def kernel_function(self):
+        ## block=(3,1,1), grid=(step,1,1)
+        basic_optimizer_ker_function = \
+        """
+        #define tx (threadIdx.x)
+        #define bx (blockIdx.x)
+
+        __global__ void basic_optimizer(float* theta, float* gradient, float* learning_rate) {
+
+            int index = tx + bx * 3;
+
+            theta[index] -= gradient[index] * learning_rate[index];
+
+            __syncthreads();
+        }
+        """
+        basic_optimizer_ker = SourceModule(basic_optimizer_ker_function)
+
+        ## block=(3,1,1), grid=(step,1,1)
+        learning_rate_tuning_ker_function = \
+        """
+        #define tx (threadIdx.x)
+        #define bx (blockIdx.x)
+
+        __global__ void learning_rate_tuning(float* error_compare, float* learning_rate, int iteration) {
+
+            int index = tx + bx * 3;
+            
+            if (error_compare[iteration-1] > error_compare[iteration]) {
+                learning_rate[index] *= 1.2;
+            }
+            else {
+                learning_rate[index] *= 0.5;
+            }
+
+            __syncthreads();
+        }
+        """
+        learning_rate_tuning_ker = SourceModule(learning_rate_tuning_ker_function)
+
+        self.basic_optimizer      = basic_optimizer_ker.get_function("basic_optimizer")
+        self.learning_rate_tuning = learning_rate_tuning_ker.get_function("learning_rate_tuning")
+        
