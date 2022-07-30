@@ -93,7 +93,7 @@ class LeastSquare:
 
 
 class MinimumEnergyControlSolver:
-    def __init__(self, x_des, x_0, upper_boundary, downer_boundary, step=50, max_epoch=100, max_iteration=20):
+    def __init__(self, x_des, x_0, upper_boundary, downer_boundary, dt=0.1, step=50, max_epoch=100, max_iteration=20):
         ## important constants
         self.axis = 3
         self.DOF  = 6
@@ -109,7 +109,7 @@ class MinimumEnergyControlSolver:
         self.max_iteration = max_iteration
 
         ## initialize MEC(minimum energy control)
-        self.MEC = MinimumEnergyControl(x_des, x_0)
+        self.MEC = MinimumEnergyControl(x_des, x_0, dt=dt)
 
         ## initialize optimizer
         learning_rate = 1e-4
