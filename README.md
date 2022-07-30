@@ -34,7 +34,7 @@ in python...
 
 > from solver import *<br>
 > 
-> MECS = MinimumEnergyControlSolver(InitialPoint, TargetPoint, UpperBoundary, DownerBoundary, StepSize, MaxEpoch, MaxIteration)<br>
+> MECS = MinimumEnergyControlSolver(InitialPoint, TargetPoint, UpperBoundary, DownerBoundary, dt, StepSize, MaxEpoch, MaxIteration)<br>
 > 
 > MECS.solve
 > 
