@@ -96,6 +96,12 @@ class Evaluator:
 
 ################################################################################
 
+    def memory_free(self):
+        ## memory free
+        self.error_vector.free()
+
+################################################################################
+
     def kernel_function(self):
         ## block=(TPB,1,1), grid=(DOF+axis*step,1,1)
         get_error_vector_ker_function = \

@@ -5,6 +5,7 @@ from optimizer              import GradientMethod, MomentumMethod, NesterovMetho
 from minimum_energy_control import MinimumEnergyControl
 from optimizer              import OptimizerForGuidance
 from constraints_for_input  import ConstraintsForInput
+from evaluate               import Evaluator
 
 from pycuda.compiler import SourceModule
 from pycuda import gpuarray
@@ -197,13 +198,13 @@ class MinimumEnergyControlSolver:
 ################################################################################
 
     def memory_free(self):
-        self.evaluator.error_vector.free()
+        pass
 
     def memory_freeall(self):
 
         try:
             self.MEC.memory_freeall()
-            self.optimizer.memory_free()
+            self.evaluator.memory_free()
 
         except:
             pass
