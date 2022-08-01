@@ -1,15 +1,12 @@
 from shared                 import Shared
 from get_gradient           import GetGradient
-from optimizer              import GradientMethod, MomentumMethod, NesterovMethod, OptimizerForGuidance
+from optimizer              import GradientMethod, MomentumMethod, NesterovMethod
 
 from minimum_energy_control import MinimumEnergyControl
 from optimizer              import OptimizerForGuidance
 from constraints_for_input  import ConstraintsForInput
 from evaluate               import Evaluator
 
-from pycuda.compiler import SourceModule
-from pycuda import gpuarray
-import pycuda.driver as cuda
 import pycuda.autoinit
 
 import numpy as np
@@ -115,7 +112,7 @@ class MinimumEnergyControlSolver:
         ## initialize optimizer
         learning_rate = 1e-4
 
-        self.optimizer = OptimizerForGuidance(learning_rate, self.step)
+        self.optimizer = OptimizerForGuidance(self.MEC, learning_rate, self.step)
 
         ## constraint
         self.upper_boundary  = upper_boundary
@@ -124,7 +121,7 @@ class MinimumEnergyControlSolver:
         self.constraint = ConstraintsForInput(self.MEC, self.upper_boundary, self.downer_boundary)
 
         ## evaluate
-        self.evaluator = Evaluator()
+        self.evaluator = Evaluator(self.MEC, self.optimizer)
         self.error = 0
 
         ## initial kernel size
@@ -150,12 +147,10 @@ class MinimumEnergyControlSolver:
                 self.MEC.run(self.step)
 
                 ## optimize
-                self.optimizer.run(self.MEC.u, self.MEC.gradient, self.step)
+                self.optimizer.run(self.step)
 
                 ## tune learning rate
                 error = self.evaluator.evaluate_error(self.error,
-                                                      self.MEC,
-                                                      self.optimizer,
                                                       self.iteration,
                                                       self.step,
                                                       self.TPB)
@@ -168,7 +163,13 @@ class MinimumEnergyControlSolver:
             self.constraint.projection(self.step)
 
             ## evaluate gradient
-            self.evaluator.evaluate_gradient(self.MEC, self.step)
+            value = self.evaluator.evaluate_gradient(self.step)
+
+            if value:
+                break
+
+            else:
+                pass
 
             ## update
             epoch += 1
@@ -198,12 +199,13 @@ class MinimumEnergyControlSolver:
 ################################################################################
 
     def memory_free(self):
-        pass
+        self.evaluator.memory_free()
 
     def memory_freeall(self):
 
         try:
             self.MEC.memory_freeall()
+            self.optimizer.memory_free()
             self.evaluator.memory_free()
 
         except:
@@ -222,4 +224,4 @@ class MinimumEnergyControlSolver:
         ## delete all memory
         self.memory_freeall()
 
-        return matrices
+        return matrices["u"], matrices

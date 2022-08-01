@@ -1,14 +1,23 @@
-import pycuda.driver as cuda
-import pycuda.autoinit
-from pycuda.compiler import SourceModule
+from kernel_function import KernelFunctions
 
+import pycuda.driver as cuda
 import numpy as np
 import math
 
 
 
 class MinimumEnergyControl:
-    def __init__(self, x_des, x_0, dt=0.1):
+
+    ## define kernel functions
+    kernel_functions = KernelFunctions.define_MEC_kernel_functions()
+
+    get_gradient      = kernel_functions["get_gradient"]
+    get_G_matrix      = kernel_functions["get_G"]
+    get_Q_matrix      = kernel_functions["get_Q"]
+    get_G_gram_matrix = kernel_functions["get_gram_G"]
+    get_G_C_matrix    = kernel_functions["get_G_C"]
+
+    def __init__(self, x_des, x_0, dt):
 
         ## very important constants
         self.axis = 3
@@ -68,19 +77,22 @@ class MinimumEnergyControl:
         ## weight
         self.rho = 0.1
 
-        ## define kernel function
-        self.kernel_function()
+################################################################################
 
     def run(self, step):
         ## get_gradient
-        self.get_gradient(self.gram_G,
-                          self.u,
-                          self.G_C,
-                          self.iteration,
-                          self.gradient,
-                          np.int32(step),
-                          block=(self.TPB,1,1),
-                          grid=(self.axis*step,1,1))
+        MinimumEnergyControl.get_gradient(
+            self.gram_G,
+            self.u,
+            self.G_C,
+            self.iteration,
+            self.gradient,
+            np.int32(step),
+            block=(self.TPB,1,1),
+            grid=(self.axis*step,1,1)
+        )
+
+################################################################################
 
     def define_problem(self, step):
         ## initialize
@@ -95,7 +107,7 @@ class MinimumEnergyControl:
         ## matrices
         self.memory_allocation(step)
         self.define_matrix(step)
-
+        
     def define_optimal_kernel_size(self, n):
         thread_per_block = int(math.sqrt(n / 2))
         
@@ -114,6 +126,7 @@ class MinimumEnergyControl:
         u      = np.zeros((self.axis*step,1)).astype(np.float32)
         u_byte = u.nbytes
         self.u = cuda.mem_alloc(u_byte)
+        cuda.memcpy_htod(self.u, u)
 
         ## G
         G       = np.zeros((self.DOF*self.axis*step)).astype(np.float32)
@@ -152,50 +165,44 @@ class MinimumEnergyControl:
         cuda.memcpy_htod(self.gradient, gradient)
 
     def define_matrix(self, step):
-        self.get_G_matrix(self.input_matrix,
-                          self.dt,
-                          self.G,
-                          block=(6,1,1),
-                          grid=(step,1,1))
+        MinimumEnergyControl.get_G_matrix(
+            self.input_matrix,
+            self.dt,
+            self.G,
+            block=(6,1,1),
+            grid=(step,1,1)
+        )
         
-        self.get_Q_matrix(self.gravity_matrix,
-                          self.dt,
-                          self.Q,
-                          block=(step,1,1),
-                          grid=(2,1,1))
-        
-        self.get_G_gram_matrix(self.G,
-                               self.rho_matrix,
-                               self.gram_G,
-                               np.int32(step),
-                               block=(3,1,1),
-                               grid=(step,step,1))
-                               
-        self.get_G_C_matrix(self.G,
-                            self.x_des,
-                            self.dt,
-                            self.x_0,
-                            self.Q,
-                            self.C,
-                            self.G_C,
-                            block=(3,1,1),
-                            grid=(step,1,1))
+        MinimumEnergyControl.get_Q_matrix(
+            self.gravity_matrix,
+            self.dt,
+            self.Q,
+            block=(step,1,1),
+            grid=(2,1,1)
+        )
 
-        ## initialize u
-        # G = np.empty((self.DOF*self.axis*step)).astype(np.float32)
-        # cuda.memcpy_dtoh(G, self.G)
-        # G = G.reshape(self.axis*step,self.DOF).T
+        MinimumEnergyControl.get_G_gram_matrix(
+            self.G,
+            self.rho_matrix,
+            self.gram_G,
+            np.int32(step),
+            block=(3,1,1),
+            grid=(step,step,1)
+        )
         
-        # C = np.empty((self.DOF)).astype(np.float32)
-        # cuda.memcpy_dtoh(C, self.C)
-        # C = C.reshape(self.DOF,1)
+        MinimumEnergyControl.get_G_C_matrix(
+            self.G,
+            self.x_des,
+            self.dt,
+            self.x_current,
+            self.Q,
+            self.C,
+            self.G_C,
+            block=(3,1,1),
+            grid=(step,1,1)
+        )
 
-        # opt_u = np.linalg.lstsq(G, C, rcond=None)[0]
-        # opt_u = np.round(opt_u, 8).astype(np.float32)
-
-        opt_u = np.zeros((self.axis*step,1)).astype(np.float32)
-        cuda.memcpy_htod(self.u, opt_u)
-        
+################################################################################
 
     def memory_free(self):
         self.rho_matrix.free()
@@ -220,200 +227,7 @@ class MinimumEnergyControl:
         self.x_0.free()
         self.x_current.free()
 
-    def kernel_function(self):
-        ## block=(TPB,1,1), grid=(axis*step,1,1)
-        get_gradient_ker_function = \
-        """
-        #define tx (threadIdx.x)
-        #define bx (blockIdx.x)
-        #define bs (blockDim.x)
-        #define gs (gridDim.x)
-
-        __global__ void get_gradient(float* matrix, float* vector1, float* vector2, int iteration, float* gradient, int step) {
-
-            __shared__ float result[1000];
-
-            result[tx] = 0.0;
-
-            for (int i = 0; i < iteration; i++) {            
-                int index1 = i + tx * iteration;
-                int index2 = index1 + bx * 3 * step;
-
-                if (index1 < gs) {
-                    result[tx] += matrix[index2] * vector1[index1];
-                }
-                else {
-                    result[1000-tx] = 0.0;
-                }
-            }
-
-            __syncthreads();
-
-            if (tx == 0) {
-                gradient[bx] = 0.0;
-
-                for (int j = 0; j < bs; j++) {
-                    gradient[bx] += result[j];
-                }
-
-                gradient[bx] -= vector2[bx];
-            }
-            else {
-                result[1000-tx] = 0.0;
-            }
-
-            __syncthreads();
-        }
-        """
-        get_gradient_ker = SourceModule(get_gradient_ker_function)
-
-        ## block=(6,1,1), grid=(step,1,1)
-        get_G_matrix_ker_function = \
-        """
-        #define tx (threadIdx.x)
-        #define bx (blockIdx.x)
-        #define step (gridDim.x)
-
-        __global__ void get_G_matrix(float* input_matrix, float dt, float* G) {
-            // 6: DOF, 18: axis * DOF
-            int index = tx + (tx%3) * 6 + bx * 18;
-
-            if (tx < 3) {
-                float value;
-                value = input_matrix[0] + (step - bx - 1) * dt * input_matrix[1];
-
-                G[index] = value;
-            }
-            else {
-                G[index] = dt;
-            }
-
-            __syncthreads();
-        }
-        """
-        get_G_matrix_ker = SourceModule(get_G_matrix_ker_function)
-
-        ## block=(step,1,1), grid=(2,1,1)
-        get_Q_matrix_ker_function = \
-        """
-        #define tx (threadIdx.x)
-        #define bx (blockIdx.x)
-        #define step (blockDim.x)
-
-        __global__ void get_Q_matrix(float* gravity, float dt, float* Q) {
-            
-            __shared__ float value[1000];
-
-            if (bx == 0) {
-                value[tx] = gravity[0] + (tx * dt) * gravity[1];
-            }
-            else {
-                value[tx] = gravity[1];
-            }
-
-            __syncthreads();
-
-            if (bx == 0) {
-                if (tx == 0) {
-                    for (int i = 0; i < step; i++) {
-                        Q[2] += value[i];
-                    }
-                }
-            }
-            else {
-                if (tx == 0) {
-                    for (int i = 0; i < step; i++) {
-                        Q[5] += value[i];
-                    }
-                }
-            }
-
-            __syncthreads();
-        }
-        """
-        get_Q_matrix_ker = SourceModule(get_Q_matrix_ker_function)
-
-        ## block=(3,1,1), grid=(step,step,1)
-        get_G_gram_matrix_ker_function = \
-        """
-        #define tx (threadIdx.x)
-        #define bx (blockIdx.x)
-        #define by (blockIdx.y)
-        #define step (gridDim.x)
-
-        __global__ void get_G_gram_matrix(float* G, float* rho_matrix, float* gram_G) {
-            // 3: axis
-            int index1 = 3 * step + 1;
-            int index2 = 3 * 3 * step;
-            int index3 = tx * index1 + bx * 3 + by * index2;
-
-            // 7: DOF+1, 18: axis*DOF
-            int index4 = tx * 7 + bx * 18;
-            int index5 = tx * 7 + by * 18;
-
-            float value = 0.0;
-            value = G[index4] * G[index5] + G[index4+3] * G[index5+3];
-
-            gram_G[index3] = value;
-
-            __syncthreads();
-
-            gram_G[index3] += rho_matrix[index3] * rho_matrix[index3];
-
-            __syncthreads();
-        }
-        """
-        get_G_gram_matrix_ker = SourceModule(get_G_gram_matrix_ker_function)
-
-        ## block=(3,1,1), grid=(step,1,1)
-        get_G_C_matrix_ker_function = \
-        """
-        #define tx (threadIdx.x)
-        #define bx (blockIdx.x)
-        #define step (gridDim.x)
-
-        __global__ void get_G_C_matrix(float* G, float* x_des, float dt, float* x_current, float* Q, float* C, float * G_C) {
-
-            __shared__ float x_A_powered[6];
-            __shared__ float C_jerk[6];
-
-            x_A_powered[tx] = x_current[tx] + step * dt * x_current[tx+3];
-            x_A_powered[tx+3] = x_current[tx+3];
-
-            __syncthreads();
-
-            C_jerk[tx] = x_des[tx] - Q[tx] - x_A_powered[tx];
-            C_jerk[tx+3] = x_des[tx+3] - Q[tx+3] - x_A_powered[tx+3];
-
-            __syncthreads();
-
-            C[tx] = C_jerk[tx];
-            C[tx+3] = C_jerk[tx+3];
-
-
-            __syncthreads();
-
-            // 7: DOF+1, 18: axis*DOF;
-            int index1 = tx * 7 + bx * 18;
-            int index2 = tx + bx * 3;
-
-            float value;
-            value = G[index1] * C_jerk[tx] + G[index1+3] * C_jerk[tx+3];
-
-            __syncthreads();
-
-            G_C[index2] = value;
-
-            __syncthreads();
-        }
-        """
-        get_G_C_matrix_ker = SourceModule(get_G_C_matrix_ker_function)
-
-        self.get_G_matrix      = get_G_matrix_ker.get_function("get_G_matrix")
-        self.get_Q_matrix      = get_Q_matrix_ker.get_function("get_Q_matrix")
-        self.get_G_gram_matrix = get_G_gram_matrix_ker.get_function("get_G_gram_matrix")
-        self.get_G_C_matrix    = get_G_C_matrix_ker.get_function("get_G_C_matrix")
-        self.get_gradient      = get_gradient_ker.get_function("get_gradient")
+################################################################################
 
     def copy_and_unpack_result(self, step):
         ## copy rho matrix

@@ -1,7 +1,10 @@
-import pycuda.driver as cuda
+from kernel_function import KernelFunctions
+
 import numpy as np
 
 from pycuda.compiler import SourceModule
+
+
 
 class Optimizer:
     def __init__(self, shared):
@@ -205,42 +208,27 @@ class NesterovMethod(Optimizer):
 
 
 class OptimizerForGuidance:
-    def __init__(self, learning_rate, step):
-        ## important parameters
-        self.axis = 3
-        self.DOF  = 6
+
+    ## define kernel functions
+    kernel_functions = KernelFunctions.define_optimizer_kernel_functions()
+
+    basic_optimizer = kernel_functions["basic_optimizer"]
+
+    def __init__(self, problem, learning_rate, step):
+
+        ## ex> MEC(minimum energy control)
+        self.problem = problem
 
         ## learning rate
         self.learning_rate = np.float32(learning_rate)
         
-        ## kernel function
-        self.kernel_function()
+################################################################################
 
-    def run(self, theta, gradient, step):
-        ## theta, gradient: gpuarray type variable
-        self.basic_optimizer(theta,
-                             gradient,
-                             self.learning_rate,
-                             block=(3,1,1),
-                             grid=(step,1,1))
-
-    def kernel_function(self):
-        ## block=(3,1,1), grid=(step,1,1)
-        basic_optimizer_ker_function = \
-        """
-        #define tx (threadIdx.x)
-        #define bx (blockIdx.x)
-
-        __global__ void basic_optimizer(float* theta, float* gradient, float learning_rate) {
-
-            int index = tx + bx * 3;
-
-            theta[index] -= gradient[index] * learning_rate;
-
-            __syncthreads();
-        }
-        """
-        basic_optimizer_ker = SourceModule(basic_optimizer_ker_function)
-        
-        self.basic_optimizer = basic_optimizer_ker.get_function("basic_optimizer")
-        
+    def run(self, step):
+        OptimizerForGuidance.basic_optimizer(
+            self.problem.u,
+            self.problem.gradient,
+            self.learning_rate,
+            block=(3,1,1),
+            grid=(step,1,1)
+        )
