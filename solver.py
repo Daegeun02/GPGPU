@@ -177,6 +177,11 @@ class MinimumEnergyControlSolver:
             ## free memory
             # self.memory_free()
 
+        ## unpack opt_u, other variables
+        matrices = self.copy_and_unpack_result()
+
+        return matrices["u"], matrices
+
 ################################################################################
 
     def define_problem(self):
@@ -224,4 +229,4 @@ class MinimumEnergyControlSolver:
         ## delete all memory
         self.memory_freeall()
 
-        return matrices["u"], matrices
+        return matrices
