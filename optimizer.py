@@ -215,7 +215,7 @@ class OptimizerForGuidance:
 
     basic_optimizer = kernel_functions["basic_optimizer"]
 
-    def __init__(self, problem, learning_rate, step):
+    def __init__(self, problem, learning_rate):
 
         ## ex> MEC(minimum energy control)
         self.problem = problem
