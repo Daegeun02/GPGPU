@@ -34,13 +34,11 @@ in python...
 
 > from solver import *<br>
 > 
-> MECS = MinimumEnergyControlSolver(InitialPoint, TargetPoint, UpperBoundary, DownerBoundary, dt, StepSize, MaxEpoch, MaxIteration)<br>
+> MECS = MinimumEnergyControlSolver(InitialPoint, TargetPoint, UpperBoundary, DownerBoundary, Lambdas, dt, StepSize, MaxEpoch, MaxIteration)<br>
 > 
-> MECS.solve
-> 
-> result = MECS.copy_and_unpack_result()<br>
-> 
-> result is dictionary type with keys {"rho_matrix", "u", "G", "gram_G", "Q", "C", "G_C", "gradient", "error", "error_vector", "norm_of_gradient"}
+> opt_u = MECS.solve()[0]
+>
+>detail is in code...
 
 end...
 
