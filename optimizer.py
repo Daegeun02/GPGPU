@@ -1,5 +1,6 @@
 from kernel_function import KernelFunctions
 
+import pycuda.driver as cuda
 import numpy as np
 
 from pycuda.compiler import SourceModule

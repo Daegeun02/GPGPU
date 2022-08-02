@@ -6,6 +6,10 @@ class KernelFunctions:
     def __init__(self):
         pass
 
+################################################################################
+################################################################################
+################################################################################
+
     @staticmethod
     def define_MEC_kernel_functions():
         ## block=(TPB,1,1), grid=(axis*step,1,1)
@@ -54,6 +58,8 @@ class KernelFunctions:
         """
         get_gradient_ker = SourceModule(get_gradient_ker_function)
 
+################################################################################
+
         ## block=(6,1,1), grid=(step,1,1)
         get_G_matrix_ker_function = \
         """
@@ -79,6 +85,8 @@ class KernelFunctions:
         }
         """
         get_G_matrix_ker = SourceModule(get_G_matrix_ker_function)
+
+################################################################################
 
         ## block=(step,1,1), grid=(2,1,1)
         get_Q_matrix_ker_function = \
@@ -120,15 +128,43 @@ class KernelFunctions:
         """
         get_Q_matrix_ker = SourceModule(get_Q_matrix_ker_function)
 
+################################################################################
+
+        ## block=(3,1,1), grid=(step,1,1)
+        get_C_matrix_ker_function = \
+        """
+        #define tx (threadIdx.x)
+        #define bx (blockIdx.x)
+        #define step (gridDim.x)
+
+        __global__ void get_C_matrix(float* x_des, float dt, float* x_current, float* Q, float* C) {
+
+            __shared__ float x_A_powered[6];
+
+            x_A_powered[tx] = x_current[tx] + step * dt * x_current[tx+3];
+            x_A_powered[tx+3] = x_current[tx+3];
+
+            __syncthreads();
+
+            C[tx] = x_des[tx] - Q[tx] - x_A_powered[tx];
+            C[tx+3] = x_des[tx+3] - Q[tx+3] - x_A_powered[tx+3];
+
+            __syncthreads();
+        }
+        """
+        get_C_matrix_ker = SourceModule(get_C_matrix_ker_function)
+
+################################################################################
+
         ## block=(3,1,1), grid=(step,step,1)
-        get_G_gram_matrix_ker_function = \
+        get_weight_ker_function = \
         """
         #define tx (threadIdx.x)
         #define bx (blockIdx.x)
         #define by (blockIdx.y)
         #define step (gridDim.x)
 
-        __global__ void get_G_gram_matrix(float* G, float* rho_matrix, float* gram_G) {
+        __global__ void get_weight(float* G, float* rho_matrix, float* weight) {
             // 3: axis
             int index1 = 3 * step + 1;
             int index2 = 3 * 3 * step;
@@ -141,70 +177,152 @@ class KernelFunctions:
             float value = 0.0;
             value = G[index4] * G[index5] + G[index4+3] * G[index5+3];
 
-            gram_G[index3] = value;
+            weight[index3] = value;
 
             __syncthreads();
 
-            gram_G[index3] += rho_matrix[index3] * rho_matrix[index3];
+            weight[index3] += rho_matrix[index3] * rho_matrix[index3];
 
             __syncthreads();
         }
         """
-        get_G_gram_matrix_ker = SourceModule(get_G_gram_matrix_ker_function)
+        get_weight_ker = SourceModule(get_weight_ker_function)
 
-        ## block=(3,1,1), grid=(step,1,1)
-        get_G_C_matrix_ker_function = \
+################################################################################
+
+        ## block=(3,2,1), grid=(step,step,1)
+        get_mva_weight_ker_function = \
+        """
+        #define tx (threadIdx.x)
+        #define ty (threadIdx.y)
+        #define bx (blockIdx.x)
+        #define by (blockIdx.y)
+        #define gs (gridDim.x)
+
+        __global__ void get_mva_weight(float* G, float* lambdas, float* identity, float* weight) {
+
+            __shared__ float value[6];
+
+            int rank1_x = bx * 18;
+            int rank1_y = by * 18;
+            
+            int index_x = rank1_x + tx * 7;
+            int index_y = rank1_y + tx * 7; 
+
+            if (ty == 0) {
+
+                value[2*tx] = lambdas[0] * G[index_x] * G[index_y];
+            }
+            else {
+
+                value[2*tx+1] = lambdas[1] * G[index_x+3] * G[index_y+3];
+            }
+
+            __syncthreads();
+
+            if (ty == 0) {
+                int rank_tx = gs * 3 + 1;
+                int rank_px = gs * 9;
+                int rank_py = 3;
+
+                int index = tx * rank_tx + bx * rank_px + by * rank_py;
+
+                weight[index] = value[2*tx] + value[2*tx+1] + identity[index];
+            }
+
+            __syncthreads();
+        }
+        """
+        get_mva_weight_ker = SourceModule(get_mva_weight_ker_function)
+
+################################################################################
+
+        ## block=(2,1,1), grid=(axis*step,1,1)
+        get_bias_ker_function = \
         """
         #define tx (threadIdx.x)
         #define bx (blockIdx.x)
-        #define step (gridDim.x)
+        #define gs (gridDim.x)
 
-        __global__ void get_G_C_matrix(float* G, float* x_des, float dt, float* x_current, float* Q, float* C, float * G_C) {
+        __global__ void get_bias(float* G, float* C, float* bias) {
 
-            __shared__ float x_A_powered[6];
-            __shared__ float C_jerk[6];
+            __shared__ float value[2];
 
-            x_A_powered[tx] = x_current[tx] + step * dt * x_current[tx+3];
-            x_A_powered[tx+3] = x_current[tx+3];
+            int rank = bx % 3;
+            int index = rank + bx * 6;
 
-            __syncthreads();
-
-            C_jerk[tx] = x_des[tx] - Q[tx] - x_A_powered[tx];
-            C_jerk[tx+3] = x_des[tx+3] - Q[tx+3] - x_A_powered[tx+3];
-
-            __syncthreads();
-
-            C[tx] = C_jerk[tx];
-            C[tx+3] = C_jerk[tx+3];
-
+            if (tx == 0) {
+                value[0] = G[index] * C[rank];
+            }
+            else {
+                value[1] = G[index+3] * C[rank+3];
+            }
 
             __syncthreads();
 
-            // 7: DOF+1, 18: axis*DOF;
-            int index1 = tx * 7 + bx * 18;
-            int index2 = tx + bx * 3;
-
-            float value;
-            value = G[index1] * C_jerk[tx] + G[index1+3] * C_jerk[tx+3];
-
-            __syncthreads();
-
-            G_C[index2] = value;
+            if (tx == 0) {
+                bias[bx] = value[0] + value[1];
+            }
 
             __syncthreads();
         }
         """
-        get_G_C_matrix_ker = SourceModule(get_G_C_matrix_ker_function)
+        get_bias_ker = SourceModule(get_bias_ker_function)
+
+################################################################################
+
+        ## block=(2,1,1), grid=(axis*step,1,1)
+        get_mva_bias_ker_function = \
+        """
+        #define tx (threadIdx.x)
+        #define bx (blockIdx.x)
+        #define gs (blockDim.x)
+
+        __global__ void get_mva_bias(float* G, float* C, float* lambdas, float* bias) {
+
+            __shared__ float value[2];
+
+            int rank1 = bx % 3;
+            int rank2 = bx / 3;
+
+            if (tx == 0) {
+                int index = rank1 * 7 + rank2 * 18;
+
+                value[0] = lambdas[0] * G[index] * C[rank1];
+            }
+            else {
+                int index = rank1 * 7 + rank2 * 18;
+
+                value[1] = lambdas[1] * G[index+3] * C[rank1+3];
+            }
+
+            __syncthreads();
+
+            if (tx == 0) {
+                bias[bx] = value[0] + value[1];
+            }
+
+            __syncthreads();
+        }
+        """
+        get_mva_bias_ker = SourceModule(get_mva_bias_ker_function)
+
+################################################################################
 
         for_MEC = dict()
-        for_MEC["get_G"]        = get_G_matrix_ker.get_function("get_G_matrix")
-        for_MEC["get_Q"]        = get_Q_matrix_ker.get_function("get_Q_matrix")
-        for_MEC["get_gram_G"]   = get_G_gram_matrix_ker.get_function("get_G_gram_matrix")
-        for_MEC["get_G_C"]      = get_G_C_matrix_ker.get_function("get_G_C_matrix")
-        for_MEC["get_gradient"] = get_gradient_ker.get_function("get_gradient")
+        for_MEC["get_gradient"]   = get_gradient_ker.get_function("get_gradient")
+        for_MEC["get_G"]          = get_G_matrix_ker.get_function("get_G_matrix")
+        for_MEC["get_Q"]          = get_Q_matrix_ker.get_function("get_Q_matrix")
+        for_MEC["get_C"]          = get_C_matrix_ker.get_function("get_C_matrix")
+        for_MEC["get_weight"]     = get_weight_ker.get_function("get_weight")
+        for_MEC["get_bias"]       = get_bias_ker.get_function("get_bias")
+        for_MEC["get_mva_weight"] = get_mva_weight_ker.get_function("get_mva_weight")
+        for_MEC["get_mva_bias"]   = get_mva_bias_ker.get_function("get_mva_bias")
 
         return for_MEC
 
+################################################################################
+################################################################################
 ################################################################################
 
     @staticmethod
@@ -225,12 +343,16 @@ class KernelFunctions:
         }
         """
         basic_optimizer_ker = SourceModule(basic_optimizer_ker_function)
+
+################################################################################
         
         for_optimizer = dict()
         for_optimizer["basic_optimizer"] = basic_optimizer_ker.get_function("basic_optimizer")
 
         return for_optimizer
 
+################################################################################
+################################################################################
 ################################################################################
 
     @staticmethod
@@ -285,6 +407,76 @@ class KernelFunctions:
         }
         """
         get_error_vector_ker = SourceModule(get_error_vector_ker_function)
+
+        ## block=(TPB,1,1), grid=(DOF+axis*step,1,1)
+        get_mva_error_vector_ker_function = \
+        """
+        #define tx (threadIdx.x)
+        #define bx (blockIdx.x)
+        #define bs (blockDim.x)
+        #define gs (gridDim.x)
+
+        __device__ float square_root(float value) {
+            float s = 0;
+            float t = 0;
+
+            s = value / 2;
+
+            for (;s != t;) {
+                t = s;
+                s = ((value/t) + t) / 2;
+            }
+
+            return s;
+        }
+
+        __global__ void get_mva_error_vector(float* G, float* lambdas, float* u, float* C, int iteration, float* error_vector) {
+            
+            if (bx < 6) {
+                __shared__ float value[1000];
+
+                value[tx] = 0.0;
+
+                int rank = bx / 3;
+
+                float rho = square_root(lambdas[rank]);
+
+                __syncthreads();
+
+                for (int i = 0; i <iteration; i++) {
+                    int index1 = i + tx * iteration;
+                    int index2 = index1 * 6 + bx;
+
+                    value[tx] += G[index2] * u[index1];
+                }
+
+                __syncthreads();
+
+                if (tx == 0) {
+                    value[1000] = 0.0;
+
+                    for (int j = 0; j < bs; j++) {
+                        value[1000] += value[j];
+                    }
+
+                    error_vector[bx] = (value[1000] - C[bx]) * rho;
+                }
+            }
+            else {
+                if (tx == 0) {
+                    int index1 = bx - 6;
+
+                    error_vector[bx] = u[index1];
+                }
+
+                __syncthreads();
+            }
+        }
+        """
+        get_mva_error_vector_ker = SourceModule(get_mva_error_vector_ker_function)
+
+
+################################################################################
 
         ## block=(step+2,1,1), grid=(1,1,1)
         get_vector_norm_ker_function = \
@@ -343,6 +535,8 @@ class KernelFunctions:
         """
         get_vector_norm_ker = SourceModule(get_vector_norm_ker_function)
 
+################################################################################
+
         ## block=(step,1,1), grid=(1,1,1)
         get_norm_of_gradient_ker_function = \
         """
@@ -399,14 +593,19 @@ class KernelFunctions:
         }
         """
         get_norm_of_gradient_ker = SourceModule(get_norm_of_gradient_ker_function)
+        
+################################################################################
 
         for_evaluator = dict()
         for_evaluator["get_error_vector"]     = get_error_vector_ker.get_function("get_error_vector")
+        for_evaluator["get_mva_error_vector"] = get_mva_error_vector_ker.get_function("get_mva_error_vector")
         for_evaluator["get_vector_norm"]      = get_vector_norm_ker.get_function("get_vector_norm")
         for_evaluator["get_norm_of_gradient"] = get_norm_of_gradient_ker.get_function("get_norm_of_gradient")
 
         return for_evaluator
 
+################################################################################
+################################################################################
 ################################################################################
 
     @staticmethod
@@ -476,11 +675,15 @@ class KernelFunctions:
         """
         projection_ker = SourceModule(projection_ker_function)
 
+################################################################################
+
         for_constraint = dict()
         for_constraint["project_function"] = projection_ker.get_function("projection")
 
         return for_constraint
 
+################################################################################
+################################################################################
 ################################################################################
 
     @staticmethod
@@ -512,6 +715,8 @@ class KernelFunctions:
         }
         """
         update_state_ker = SourceModule(update_state_ker_function)
+
+################################################################################
 
         for_updater = dict()
         for_updater["update_state"] = update_state_ker.get_function("update_state")

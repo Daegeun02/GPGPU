@@ -1,7 +1,7 @@
 from kernel_function import KernelFunctions
 
 import pycuda.driver as cuda
-import numpy as np
+import numpy         as np
 import math
 
 
@@ -11,13 +11,16 @@ class MinimumEnergyControl:
     ## define kernel functions
     kernel_functions = KernelFunctions.define_MEC_kernel_functions()
 
-    get_gradient      = kernel_functions["get_gradient"]
-    get_G_matrix      = kernel_functions["get_G"]
-    get_Q_matrix      = kernel_functions["get_Q"]
-    get_G_gram_matrix = kernel_functions["get_gram_G"]
-    get_G_C_matrix    = kernel_functions["get_G_C"]
+    get_gradient   = kernel_functions["get_gradient"]
+    get_G_matrix   = kernel_functions["get_G"]
+    get_Q_matrix   = kernel_functions["get_Q"]
+    get_C_matrix   = kernel_functions["get_C"]
+    get_weight     = kernel_functions["get_weight"]
+    get_bias       = kernel_functions["get_bias"]
+    get_mva_weight = kernel_functions["get_mva_weight"]
+    get_mva_bias   = kernel_functions["get_mva_bias"]
 
-    def __init__(self, x_des, x_0, dt):
+    def __init__(self, x_des, x_0, dt, lambdas):
 
         ## very important constants
         self.axis = 3
@@ -75,16 +78,33 @@ class MinimumEnergyControl:
         self.dt = np.float32(dt)
 
         ## weight
-        self.rho = 0.1
+        if lambdas.nbytes == 8:
+            self.rho = 1 / lambdas[0]
+            
+            ## more velocity accuracy
+            self.mva = False
+
+        elif lambdas.nbytes == 16:
+            lambdas = lambdas.astype(np.float32)
+            lambdas_byte = lambdas.nbytes
+            self.lambdas = cuda.mem_alloc(lambdas_byte)
+            cuda.memcpy_htod(self.lambdas, lambdas)
+
+            ## more velocity accuracy
+            self.mva = True
+
+        else:
+            print("not proper lambdas")
+            return ValueError()
 
 ################################################################################
 
     def run(self, step):
         ## get_gradient
         MinimumEnergyControl.get_gradient(
-            self.gram_G,
+            self.weight,
             self.u,
-            self.G_C,
+            self.bias,
             self.iteration,
             self.gradient,
             np.int32(step),
@@ -107,6 +127,8 @@ class MinimumEnergyControl:
         ## matrices
         self.memory_allocation(step)
         self.define_matrix(step)
+
+################################################################################
         
     def define_optimal_kernel_size(self, n):
         thread_per_block = int(math.sqrt(n / 2))
@@ -115,12 +137,21 @@ class MinimumEnergyControl:
 
         return thread_per_block, np.int32(iteration)
 
+################################################################################
+
     def memory_allocation(self, step):
-        ## rho matrix: 36 * step * step bytes
-        rho_matrix      = (math.sqrt(self.rho) * np.identity(self.axis*step)).astype(np.float32)
-        rho_matrix_byte = rho_matrix.nbytes
-        self.rho_matrix = cuda.mem_alloc(rho_matrix_byte)
-        cuda.memcpy_htod(self.rho_matrix, rho_matrix)
+        if self.mva:
+            ## identity matrix: same size as rho_matrix
+            identity = (np.identity(self.axis*step)).astype(np.float32)
+            identity_byte = identity.nbytes
+            self.identity = cuda.mem_alloc(identity_byte)
+            cuda.memcpy_htod(self.identity, identity)
+        else:
+            ## rho matrix: 36 * step * step bytes
+            rho_matrix      = (math.sqrt(self.rho) * np.identity(self.axis*step)).astype(np.float32)
+            rho_matrix_byte = rho_matrix.nbytes
+            self.rho_matrix = cuda.mem_alloc(rho_matrix_byte)
+            cuda.memcpy_htod(self.rho_matrix, rho_matrix)
 
         ## solution!!!
         u      = np.zeros((self.axis*step,1)).astype(np.float32)
@@ -135,10 +166,10 @@ class MinimumEnergyControl:
         cuda.memcpy_htod(self.G, G)
 
         ## gram_G
-        gram_G      = np.zeros((self.axis*self.axis*step*step)).astype(np.float32)
-        gram_G_byte = gram_G.nbytes
-        self.gram_G = cuda.mem_alloc(gram_G_byte)
-        cuda.memcpy_htod(self.gram_G, gram_G)
+        weight     = np.zeros((self.axis*self.axis*step*step)).astype(np.float32)
+        weight_byte = weight.nbytes
+        self.weight = cuda.mem_alloc(weight_byte)
+        cuda.memcpy_htod(self.weight, weight)
 
         ## Q
         Q      = np.zeros((self.DOF)).astype(np.float32)
@@ -153,16 +184,18 @@ class MinimumEnergyControl:
         cuda.memcpy_htod(self.C, C)
 
         ## G_C
-        G_C      = np.zeros((self.axis*step)).astype(np.float32)
-        G_C_byte = G_C.nbytes 
-        self.G_C = cuda.mem_alloc(G_C_byte)
-        cuda.memcpy_htod(self.G_C, G_C)
+        bias      = np.zeros((self.axis*step)).astype(np.float32)
+        bias_byte = bias.nbytes 
+        self.bias = cuda.mem_alloc(bias_byte)
+        cuda.memcpy_htod(self.bias, bias)
 
         ## gradient
         gradient      = np.zeros((self.axis*step)).astype(np.float32)
         gradient_byte = gradient.nbytes
         self.gradient = cuda.mem_alloc(gradient_byte)
         cuda.memcpy_htod(self.gradient, gradient)
+
+################################################################################
 
     def define_matrix(self, step):
         MinimumEnergyControl.get_G_matrix(
@@ -181,37 +214,63 @@ class MinimumEnergyControl:
             grid=(2,1,1)
         )
 
-        MinimumEnergyControl.get_G_gram_matrix(
-            self.G,
-            self.rho_matrix,
-            self.gram_G,
-            np.int32(step),
-            block=(3,1,1),
-            grid=(step,step,1)
-        )
-        
-        MinimumEnergyControl.get_G_C_matrix(
-            self.G,
+        MinimumEnergyControl.get_C_matrix(
             self.x_des,
             self.dt,
             self.x_current,
             self.Q,
             self.C,
-            self.G_C,
             block=(3,1,1),
             grid=(step,1,1)
         )
+
+        if self.mva:
+            MinimumEnergyControl.get_mva_weight(
+                self.G,
+                self.lambdas,
+                self.identity,
+                self.weight,
+                block=(3,2,1),
+                grid=(step,step,1)
+            )
+
+            MinimumEnergyControl.get_mva_bias(
+                self.G,
+                self.C,
+                self.lambdas,
+                self.bias,
+                block=(2,1,1),
+                grid=(self.axis*step,1,1)
+            )
+
+        else:
+            MinimumEnergyControl.get_weight(
+                self.G,
+                self.rho_matrix,
+                self.weight,
+                block=(3,1,1),
+                grid=(step,step,1)
+            )
+            
+            MinimumEnergyControl.get_bias(
+                self.G,
+                self.C,
+                self.bias,
+                block=(2,1,1),
+                grid=(self.axis*step,1,1)
+            )
 
 ################################################################################
 
     def memory_free(self):
         self.rho_matrix.free()
+        self.identity.free()
         self.u.free()
         self.G.free()
-        self.gram_G.free()
+        self.weight.free()
         self.Q.free()
         self.C.free()
-        self.G_C.free()
+        self.bias.free()
         self.gradient.free()
 
     def memory_freeall(self):
@@ -230,9 +289,14 @@ class MinimumEnergyControl:
 ################################################################################
 
     def copy_and_unpack_result(self, step):
-        ## copy rho matrix
-        rho_matrix = np.empty((self.axis*self.axis*step*step)).astype(np.float32)
-        cuda.memcpy_dtoh(rho_matrix, self.rho_matrix)
+
+        if self.mva:
+            pass
+            
+        else:
+            ## copy rho matrix
+            rho_matrix = np.empty((self.axis*self.axis*step*step)).astype(np.float32)
+            cuda.memcpy_dtoh(rho_matrix, self.rho_matrix)
 
         ## copy solution
         u = np.empty((self.axis*step)).astype(np.float32)
@@ -243,8 +307,8 @@ class MinimumEnergyControl:
         cuda.memcpy_dtoh(G, self.G)
 
         ## copy gram matrix of G
-        gram_G = np.empty((self.axis*self.axis*step*step)).astype(np.float32)
-        cuda.memcpy_dtoh(gram_G, self.gram_G)
+        weight = np.empty((self.axis*self.axis*step*step)).astype(np.float32)
+        cuda.memcpy_dtoh(weight, self.weight)
 
         ## copy Q matrix
         Q = np.empty((self.DOF)).astype(np.float32)
@@ -255,8 +319,8 @@ class MinimumEnergyControl:
         cuda.memcpy_dtoh(C, self.C)
 
         ## copy G_C matrix
-        G_C = np.empty((self.axis*step)).astype(np.float32)
-        cuda.memcpy_dtoh(G_C, self.G_C)
+        bias = np.empty((self.axis*step)).astype(np.float32)
+        cuda.memcpy_dtoh(bias, self.bias)
 
         ## copy gradient vector
         gradient = np.empty((self.axis*step)).astype(np.float32)
@@ -264,13 +328,13 @@ class MinimumEnergyControl:
 
         ## pack data
         matrices = dict()
-        matrices["rho_matrix"] = rho_matrix.reshape(self.axis*step,self.axis*step)
+        # matrices["rho_matrix"] = rho_matrix.reshape(self.axis*step,self.axis*step)
         matrices["u"]          = u.reshape(self.axis*step,1)
         matrices["G"]          = G.reshape(self.axis*step,self.DOF).T 
-        matrices["gram_G"]     = gram_G.reshape(self.axis*step,self.axis*step) 
+        matrices["weight"]     = weight.reshape(self.axis*step,self.axis*step) 
         matrices["Q"]          = Q.reshape(self.DOF,1)
         matrices["C"]          = C.reshape(self.DOF,1)
-        matrices["G_C"]        = G_C.reshape(self.axis*step,1)
+        matrices["bias"]       = bias.reshape(self.axis*step,1)
         matrices["gradient"]   = gradient.reshape(self.axis*step,1)
 
         ## delete all memory

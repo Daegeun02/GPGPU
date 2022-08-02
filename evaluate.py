@@ -11,6 +11,7 @@ class Evaluator:
     kernel_functions = KernelFunctions.define_evaluator_kernel_functions()
 
     get_error_vector     = kernel_functions["get_error_vector"]
+    get_mva_error_vector = kernel_functions["get_mva_error_vector"]
     get_vector_norm      = kernel_functions["get_vector_norm"]
     get_norm_of_gradient = kernel_functions["get_norm_of_gradient"]
 
@@ -33,7 +34,8 @@ class Evaluator:
 ################################################################################
 
     def define_error_vector(self, step):
-        error_vector = np.zeros((self.axis*step)).astype(np.float32)
+
+        error_vector      = np.ones((self.axis*step)).astype(np.float32)
         error_vector_byte = error_vector.nbytes
         self.error_vector = cuda.mem_alloc(error_vector_byte)
         cuda.memcpy_htod(self.error_vector, error_vector)
@@ -69,22 +71,35 @@ class Evaluator:
         grid_size  = self.axis * step + self.DOF
 
         ## evaluate learning
-        Evaluator.get_error_vector(
-            self.problem.G,
-            self.problem.rho_matrix,
-            self.problem.u,
-            self.problem.C,
-            iteration,
-            self.error_vector,
-            block=(TPB,1,1),
-            grid=(grid_size,1,1)
-        )
+        if self.problem.mva:
+            Evaluator.get_mva_error_vector(
+                self.problem.G,
+                self.problem.lambdas,
+                self.problem.u,
+                self.problem.C,
+                iteration,
+                self.error_vector,
+                block=(TPB,1,1),
+                grid=(grid_size,1,1)
+            )
+
+        else:
+            Evaluator.get_error_vector(
+                self.problem.G,
+                self.problem.rho_matrix,
+                self.problem.u,
+                self.problem.C,
+                iteration,
+                self.error_vector,
+                block=(TPB,1,1), 
+                grid=(grid_size,1,1)
+            )
 
         Evaluator.get_vector_norm(
             self.error_vector,
             error,
             block=(block_size,1,1),
-        grid=(1,1,1)
+            grid=(1,1,1)
         )
 
 ################################################################################
